@@ -1,9 +1,23 @@
+mod minimax;
+
 use rand::Rng;
 use rand::prelude::SliceRandom;
 use rand::rngs::ThreadRng;
 use std::cmp::PartialEq;
 use std::fmt::Formatter;
 use std::{fmt, io};
+use crate::minimax::minimax;
+
+const WIN_MASKS: [u16; 8] = [
+    0b000000111, // row 1
+    0b000111000, // row 2
+    0b111000000, // row 3
+    0b001001001, // col 1
+    0b010010010, // col 2
+    0b100100100, // col 3
+    0b100010001, // diag
+    0b001010100, // diag
+];
 
 #[derive(Copy, Clone, Debug)]
 struct Cu8(u8);
@@ -39,13 +53,17 @@ struct State {
     tiles: [Cu8; 9],
     turn: u8, // 0 -> bot | 1 -> player
     player_stamp: Cu8,
+    player_mask: u16,
+    bot_mask: u16,
 }
 impl State {
     fn new(rng: &mut ThreadRng) -> Self {
         State {
             tiles: [Cu8(0u8); 9],
-            turn: rng.gen_range(0..=1),
+            turn: rng.gen_range(0..=1), // realistically, X should always start first
             player_stamp: Cu8(rng.gen_range(1..=2)),
+            player_mask: 0b000000000,
+            bot_mask: 0b000000000,
         }
     }
 
@@ -65,8 +83,18 @@ impl State {
         )
     }
 
-    fn update_board(&mut self, tile: usize, stamp: Cu8) {
+    fn update_board(&mut self, tile: usize, is_player: bool) {
+        let stamp = if is_player {
+            self.player_stamp
+        } else {
+            self.player_stamp.negate()
+        };
         self.tiles[tile - 1] = stamp;
+        if is_player {
+            self.player_mask |= 1 << (tile - 1) //I messed up, it should've been 0 based indexing
+        } else {
+            self.bot_mask |= 1 << (tile - 1)
+        };
     }
 
     fn validate_move(&self, tile: &str) -> Result<usize, &'static str> {
@@ -86,6 +114,7 @@ impl State {
     }
 
     fn bot_move(&mut self, rng: &mut ThreadRng) {
+        minimax(&self);
         let empty_tiles: Vec<usize> = self
             .tiles
             .iter()
@@ -94,7 +123,7 @@ impl State {
             .map(|(i, _)| i)
             .collect();
         let valid_move = empty_tiles.choose(rng).unwrap();
-        self.update_board(*valid_move + 1, self.player_stamp.negate());
+        self.update_board(*valid_move + 1, false);
     }
 
     fn change_turn(&mut self) {
@@ -105,39 +134,23 @@ impl State {
         }
     }
 
-    fn _winner_tag(&self, stamp: Cu8) -> &'static str {
-        if stamp == self.player_stamp {
+    fn _winner_tag(&self) -> &'static str {
+        if self.turn == 1 {
             "You won!"
         } else {
             "Bot won, try again!"
         }
     }
 
-    fn _tile_conditional(&self, t1: Cu8, t2: Cu8, t3: Cu8) -> bool {
-        if t1 != Cu8(0) && t1 == t2 && t2 == t3 {
-            true
-        } else {
-            false
-        }
-    }
-
     fn check_winner(&self) -> Option<&'static str> {
-        if self._tile_conditional(self.tiles[0], self.tiles[1], self.tiles[2]) {
-            Some(self._winner_tag(self.tiles[0]))
-        } else if self._tile_conditional(self.tiles[3], self.tiles[4], self.tiles[5]) {
-            Some(self._winner_tag(self.tiles[3]))
-        } else if self._tile_conditional(self.tiles[6], self.tiles[7], self.tiles[8]) {
-            Some(self._winner_tag(self.tiles[6]))
-        } else if self._tile_conditional(self.tiles[0], self.tiles[3], self.tiles[6]) {
-            Some(self._winner_tag(self.tiles[0]))
-        } else if self._tile_conditional(self.tiles[1], self.tiles[4], self.tiles[7]) {
-            Some(self._winner_tag(self.tiles[1]))
-        } else if self._tile_conditional(self.tiles[2], self.tiles[5], self.tiles[8]) {
-            Some(self._winner_tag(self.tiles[2]))
-        } else if self._tile_conditional(self.tiles[0], self.tiles[4], self.tiles[8]) {
-            Some(self._winner_tag(self.tiles[0]))
-        } else if self._tile_conditional(self.tiles[2], self.tiles[4], self.tiles[6]) {
-            Some(self._winner_tag(self.tiles[2]))
+        let mask = if self.turn == 1 {
+            self.player_mask
+        } else {
+            self.bot_mask
+        };
+
+        if WIN_MASKS.iter().any(|&win| win & mask == win) {
+            Some(self._winner_tag())
         } else if !self.tiles.contains(&Cu8(0)) {
             Some("Draw!")
         } else {
@@ -146,8 +159,9 @@ impl State {
     }
 }
 
+// can we just use bit masks for all operations?
 fn main() {
-    let mut rng = rand::thread_rng(); // better to cache?
+    let mut rng = rand::thread_rng(); // is there any performance benefit caching this?
     let mut state = State::new(&mut rng);
 
     println!("{}", "Tic Tac Toe! [type quit to exit]");
@@ -181,19 +195,19 @@ fn main() {
                     }
                 };
 
-                state.update_board(tile as usize, state.player_stamp);
+                state.update_board(tile, true);
             }
             _ => {}
         }
 
         println!("{}\n\n", state.get_board());
-        state.change_turn();
         match state.check_winner() {
-            Some(winner) => {
-                println!("{}", winner);
+            Some(tag) => {
+                println!("{}", tag);
                 break;
             }
-            None => continue,
+            None => {}
         }
+        state.change_turn();
     }
 }
