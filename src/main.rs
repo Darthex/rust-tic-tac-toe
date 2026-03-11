@@ -1,13 +1,25 @@
 mod minimax;
 
+use crate::minimax::best_move;
 use rand::Rng;
-use rand::prelude::SliceRandom;
-use rand::rngs::ThreadRng;
 use std::cmp::PartialEq;
 use std::fmt::Formatter;
 use std::{fmt, io};
-use crate::minimax::minimax;
 
+/// All possible winning patterns on a tic-tac-toe board.
+///
+/// Each number represents a 9-bit mask where:
+///
+/// 0 | 1 | 2
+/// ---------
+/// 3 | 4 | 5
+/// ---------
+/// 6 | 7 | 8
+///
+/// Example:
+/// Top row = 0b000000111
+/// Middle row = 0b000111000
+/// Left column = 0b001001001
 const WIN_MASKS: [u16; 8] = [
     0b000000111, // row 1
     0b000111000, // row 2
@@ -21,6 +33,7 @@ const WIN_MASKS: [u16; 8] = [
 
 #[derive(Copy, Clone, Debug)]
 struct Cu8(u8);
+
 impl Cu8 {
     fn get_stamp(&self) -> &str {
         match self {
@@ -38,11 +51,13 @@ impl Cu8 {
         }
     }
 }
+
 impl fmt::Display for Cu8 {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}", self.get_stamp())
     }
 }
+
 impl PartialEq for Cu8 {
     fn eq(&self, other: &Self) -> bool {
         if self.0 != other.0 { false } else { true }
@@ -56,12 +71,14 @@ struct State {
     player_mask: u16,
     bot_mask: u16,
 }
+
 impl State {
-    fn new(rng: &mut ThreadRng) -> Self {
+    fn new() -> Self {
+        let turn = rand::thread_rng().gen_range(0..=1);
         State {
             tiles: [Cu8(0u8); 9],
-            turn: rng.gen_range(0..=1), // realistically, X should always start first
-            player_stamp: Cu8(rng.gen_range(1..=2)),
+            turn,
+            player_stamp: if turn == 0 { Cu8(2) } else { Cu8(1) },
             player_mask: 0b000000000,
             bot_mask: 0b000000000,
         }
@@ -113,17 +130,9 @@ impl State {
         }
     }
 
-    fn bot_move(&mut self, rng: &mut ThreadRng) {
-        minimax(&self);
-        let empty_tiles: Vec<usize> = self
-            .tiles
-            .iter()
-            .enumerate()
-            .filter(|(_, x)| **x == Cu8(0))
-            .map(|(i, _)| i)
-            .collect();
-        let valid_move = empty_tiles.choose(rng).unwrap();
-        self.update_board(*valid_move + 1, false);
+    fn bot_move(&mut self) {
+        let pos = best_move(self.player_mask, self.bot_mask);
+        self.update_board(pos + 1, false);
     }
 
     fn change_turn(&mut self) {
@@ -161,8 +170,7 @@ impl State {
 
 // can we just use bit masks for all operations?
 fn main() {
-    let mut rng = rand::thread_rng(); // is there any performance benefit caching this?
-    let mut state = State::new(&mut rng);
+    let mut state = State::new();
 
     println!("{}", "Tic Tac Toe! [type quit to exit]");
     println!("Your stamp is {}\n\n", state.player_stamp);
@@ -171,7 +179,7 @@ fn main() {
         match state.turn {
             0 => {
                 println!("{}", "Bot's turn");
-                state.bot_move(&mut rng);
+                state.bot_move();
             }
             1 => {
                 println!("{}", "Your turn, choose your move [0-9]");
